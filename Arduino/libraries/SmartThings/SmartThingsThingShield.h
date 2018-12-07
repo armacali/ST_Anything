@@ -30,6 +30,7 @@
 /// 	-2016-06-04  Dan Ogorchock  Added improved support for Arduino Leonardo
 ///		-2017-02-04  Dan Ogorchock  Modified to be a subclass of new SmartThings base class
 ///		-2017-02-08  Dan Ogorchock  Cleaned up.  Now uses HardwareSerial* objects directly.
+///     -2017-08-14  Dan Ogorchock  Disabled SoftwareSerial support if compiling ESP32 board
 //*******************************************************************************
 #ifndef __SMARTTHINGS_THINGSHIELD_H__
 #define __SMARTTHINGS_THINGSHIELD_H__
@@ -56,6 +57,8 @@
 #elif defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__)
 #define BOARD_TYPE BOARD_TYPE_MEGA
 #define DISABLE_SOFTWARESERIAL  //Assume HW Serial is being used.  Saves some program space while using HW Serial
+#elif defined(ARDUINO_ARCH_SAMD) || defined(ARDUINO_ARCH_ESP32)
+#define DISABLE_SOFTWARESERIAL  //The SAMD chip (e.g. MKR1000) and ESP32 do not support SoftwareSerial
 #else	//assume user is using an UNO for the unknown case
 #define BOARD_TYPE BOARD_TYPE_UNO
 //#define DISABLE_SOFTWARESERIAL  // uncomment to disable SoftwareSerial to save some program space if neccessary while using HW Serial
@@ -125,7 +128,7 @@ namespace st
 		///   @param[in] enableDebug (optional) - Enable internal Library debug
 		//*******************************************************************************
 #ifndef DISABLE_SOFTWARESERIAL
-		SmartThingsThingShield(uint8_t pinRX, uint8_t pinTX, SmartThingsCallout_t *callout, String shieldType = "ThingShield", bool enableDebug = false);
+		SmartThingsThingShield(uint8_t pinRX, uint8_t pinTX, SmartThingsCallout_t *callout, String shieldType = "ThingShield", bool enableDebug = false, int transmitInterval = 1000);
 #else
 		//*******************************************************************************
 		/// @brief  SmartThings HardwareSerial Constructor 
@@ -134,7 +137,7 @@ namespace st
 		///   @param[in] shieldType (optional) - Set the Reported SheildType to the Server 
 		///   @param[in] enableDebug (optional) - Enable internal Library debug
 		//*******************************************************************************
-		SmartThingsThingShield(HardwareSerial* hwSerialPort, SmartThingsCallout_t *callout, String shieldType = "ThingShield", bool enableDebug = false);
+		SmartThingsThingShield(HardwareSerial* hwSerialPort, SmartThingsCallout_t *callout, String shieldType = "ThingShield", bool enableDebug = false, int transmitInterval = 1000);
 #endif
 		//*******************************************************************************
 		/// @brief Destructor 
