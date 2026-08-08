@@ -6,10 +6,10 @@
 //			  It inherits from the st::InterruptSensor class.
 //
 //			  Create an instance of this class in your sketch's global variable section
-//			  For Example:  st::IS_Button sensor("button1", PIN_BUTTON1, 1000, LOW, true, 500);
+//			  For Example:  st::IS_Button sensor(F("button1"), PIN_BUTTON1, 1000, LOW, true, 500);
 //
 //			  st::IS_Button() constructor requires the following arguments
-//				- String &name - REQUIRED - the name of the object - should be "button:1", "button:2", "button:3", etc... THE COLON IS REQUIRED!
+//				- String &name - REQUIRED - the name of the object - should be "button1", "button2", "button3", etc...
 //				- byte pin - REQUIRED - the Arduino Pin to be used as a digital input
 //				- long reqNumMillisHeld - Required - number of milliseconds required needed to detect a "Held" condition versus a "Pushed" (default = 1000)
 //				- bool iState - OPTIONAL - LOW or HIGH - determines which value indicates the interrupt is true (default = HIGH)
@@ -20,8 +20,8 @@
 //
 //    Date        Who            What
 //    ----        ---            ----
-//    2017-03-25  Dan            Original Creation
-//
+//    2017-03-25  Dan Ogorchock  Original Creation
+//    2020-09-19  Dan Ogorchock  Modified to not wait until button is released to send 'held' event, also added released events
 //
 //******************************************************************************************
 
@@ -38,6 +38,7 @@ namespace st
 			unsigned long m_lTimeBtnPressed;	    //time when the digital input went high
 			unsigned long m_lreqNumMillisHeld;  	//amount of time required to trigger "held" instead of "pushed"
 			bool m_bFirstRun = true;				//used to prevent sending inadvertent button pushed/held message on startup
+			bool m_bHeldSent = false;				//used to prevent sending multiple 'held' messages
 
 		public:
 			//constructor - called in your sketch's global variable declaration section
@@ -49,7 +50,7 @@ namespace st
 			//initialization function
 			virtual void init();
 
-			//called periodically by Everything class to ensure ST Cloud is kept consistent with the state of the contact sensor
+			//called periodically by Everything class to ensure ST Cloud is kept up to date.  Not used for IS_Button.
 			virtual void refresh();
 
 			//handles what to do when interrupt is triggered 
@@ -57,7 +58,9 @@ namespace st
 
 			//handles what to do when interrupt is ended 
 			virtual void runInterruptEnded();
-	
+
+			//override update method
+			virtual void update();
 	};
 }
 

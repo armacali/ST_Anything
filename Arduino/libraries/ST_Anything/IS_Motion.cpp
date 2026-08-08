@@ -6,7 +6,7 @@
 //			  It inherits from the st::InterruptSensor class.
 //
 //			  Create an instance of this class in your sketch's global variable section
-//			  For Example:  st::IS_Motion sensor5("motion", PIN_MOTION, HIGH);
+//			  For Example:  st::IS_Motion sensor5(F("motion1"), PIN_MOTION, HIGH, false, 500);
 //
 //			  st::IS_Motion() constructor requires the following arguments
 //				- String &name - REQUIRED - the name of the object - must match the Groovy ST_Anything DeviceType tile name
@@ -14,14 +14,17 @@
 //				- bool iState - OPTIONAL - LOW or HIGH - determines which value indicates the interrupt is true
 //				- bool internalPullup - OPTIONAL - true == INTERNAL_PULLUP
 //				- long numReqCounts - OPTIONAL - number of counts before changing state of input (prevent false alarms)
+//              - long inactiveTimeout - OPTIONAL - number of milliseconds motion must be inactive before sending update to hub (default = 0)
 //
 //  Change History:
 //
 //    Date        Who            What
 //    ----        ---            ----
 //    2015-01-03  Dan & Daniel   Original Creation
-//	  2016-09-03  Dan			 Added optional "numReqCounts" constructor argument/capability
-//    2017-01-25  Dan            Corrected issue with INPUT_PULLUP per request of Jiri Culik
+//	  2016-09-03  Dan Ogorchock  Added optional "numReqCounts" constructor argument/capability
+//    2017-01-25  Dan Ogorchock  Corrected issue with INPUT_PULLUP per request of Jiri Culik
+//    2018-08-30  Dan Ogorchock  Modified comment section above to comply with new Parent/Child Device Handler requirements
+//    2020-01-31  Dan Ogorchock  Added optional inactivity timeout
 //
 //
 //******************************************************************************************
@@ -37,9 +40,11 @@ namespace st
 
 //public
 	//constructor
-	IS_Motion::IS_Motion(const __FlashStringHelper *name, byte pin, bool iState, bool pullup, long numReqCounts) :
+	IS_Motion::IS_Motion(const __FlashStringHelper *name, byte pin, bool iState, bool pullup, long numReqCounts, long inactiveTimeout) :
 		InterruptSensor(name, pin, iState, pullup, numReqCounts),  //use parent class' constructor
-		calibrated(false)
+		calibrated(false),
+		m_inactiveTimeout(inactiveTimeout),
+		m_inactiveTimerRunning(false)
 		{
 		}
 	
@@ -67,20 +72,33 @@ namespace st
 
 	void IS_Motion::runInterrupt()
 	{
-		//add the "active" event to the buffer to be queued for transfer to the ST Shield
-		Everything::sendSmartString(getName() + F(" active"));
+		if (m_inactiveTimerRunning == false) {
+			//add the "active" event to the buffer to be queued for transfer to the ST Shield
+			Everything::sendSmartString(getName() + F(" active"));
+		}
+		//cancel any inactivity timer that may be running
+		m_inactiveTimerRunning = false;
+
 	}
 	
 	void IS_Motion::runInterruptEnded()
 	{
-		//add the "inactive" event to the buffer to be queued for transfer to the ST Shield
-		Everything::sendSmartString(getName() + F(" inactive"));
+		//start inactivity timer 
+		m_inactiveTimer = millis();
+		m_inactiveTimerRunning = true;
 	}
 	
 	void IS_Motion::update()
 	{
-		if(calibrated)
+		if (calibrated) {
 			InterruptSensor::update();
+
+			if ((m_inactiveTimerRunning == true) && (millis() > m_inactiveTimer + m_inactiveTimeout)) {
+				m_inactiveTimerRunning = false;
+				//add the "inactive" event to the buffer to be queued for transfer to the ST Shield
+				Everything::sendSmartString(getName() + F(" inactive"));
+			}
+		}
 		else
 			if(millis()>timer+30000)
 			{

@@ -22,6 +22,11 @@
 //    2015-03-28  Dan Ogorchock  Added throttling capability to sendStrings to improve success rate of ST Cloud getting the data ("SENDSTRINGS_INTERVAL" is in CONSTANTS.H)
 //    2017-02-07  Dan Ogorchock  Added support for new SmartThings v2.0 library (ThingShield, W5100, ESP8266)
 //    2017-02-19  Dan Ogorchock  Fixed bug in throttling capability
+//    2017-04-26  Dan Ogorchock  Allow each communication method to specify unique ST transmission throttling delay
+//    2019-02-09  Dan Ogorchock  Add update() call to Executors in support of devices like EX_Servo that need a non-blocking mechanism
+//    2019-02-24  Dan Ogorchock  Added new special callOnMsgRcvd2 callback capability. Allows recvd string to be manipulated in the sketch before being processed by Everything.
+//    2021-01-31  Marcus van Ierssel Improved the automatic refresh to prevent it from blocking other updates.
+//    2021-05-23  Dan Ogorchock  Address EXP8266 v3.0.0 board support package compatibility issue with Strings  
 //
 //******************************************************************************************
 
@@ -30,16 +35,24 @@
 #include "Everything.h"
 
 long freeRam();	//freeRam() function prototype - useful in determining how much SRAM is available on Arduino
-
+#if defined(ARDUINO_ARCH_SAMD)
+extern "C" char* sbrk(int incr);
+#endif
 namespace st
 {
 	
 //private
-	void Everything::updateSensors()
+	void Everything::updateDevices()
 	{
 		for(unsigned int index=0; index<m_nSensorCount; ++index)
 		{
 			m_Sensors[index]->update();
+			sendStrings();
+		}
+
+		for (unsigned int i = 0; i<m_nExecutorCount; ++i)
+		{
+			m_Executors[i]->update();
 			sendStrings();
 		}
 	}
@@ -72,12 +85,16 @@ namespace st
 			{
 				Serial.print(F("Everything: Sending: "));
 				Serial.println(Return_String.substring(0, index));
+				//Serial.print(F("Everything: getTransmitInterval() = "));
+				//Serial.println(SmartThing->getTransmitInterval());
 			}
 			#ifndef DISABLE_SMARTTHINGS
-			if (millis() - sendstringsLastMillis < Constants::SENDSTRINGS_INTERVAL)
+//			if (millis() - sendstringsLastMillis < Constants::SENDSTRINGS_INTERVAL)
+			if (millis() - sendstringsLastMillis < SmartThing->getTransmitInterval())
 				{
-					delay(Constants::SENDSTRINGS_INTERVAL - (millis() - sendstringsLastMillis)); //Added due to slow ST Hub/Cloud Processing.  Events were being missed.  DGO 2015-03-28
-				}
+//					delay(Constants::SENDSTRINGS_INTERVAL - (millis() - sendstringsLastMillis)); //Added due to slow ST Hub/Cloud Processing.  Events were being missed.  DGO 2015-03-28
+					delay(SmartThing->getTransmitInterval() - (millis() - sendstringsLastMillis)); //modified to allow different values for each method of communicating to ST cloud.  DGO 2017-04-26
+			}
 				SmartThing->send(Return_String.substring(0, index));
 				sendstringsLastMillis = millis();
 			#endif
@@ -97,19 +114,40 @@ namespace st
 	
 	void Everything::refreshDevices()
 	{
+		static int refresh_Executor = 0;
+		static int refresh_Sensor = 0;
+		/*
 		for(unsigned int i=0; i<m_nExecutorCount; ++i)
 		{
-			m_Executors[i]->refresh();
-			sendStrings();
+				m_Executors[i]->refresh();
+				sendStrings();
 		}
 
 		for (unsigned int i = 0; i<m_nSensorCount; ++i)
 		{
-			m_Sensors[i]->refresh();
+				m_Sensors[i]->refresh();
+				sendStrings();
+		}
+		*/
+		if (refresh_Executor < m_nExecutorCount) {
+			m_Executors[refresh_Executor]->refresh();
 			sendStrings();
+			refresh_Executor++;
+			refLastMillis = millis() - long(Constants::DEV_REFRESH_INTERVAL) * 1000 + 4 * SmartThing->getTransmitInterval();
+		}
+		else if (refresh_Sensor < m_nSensorCount) {
+			m_Sensors[refresh_Sensor]->refresh();
+			sendStrings();
+			refresh_Sensor++;
+			refLastMillis = millis() - long(Constants::DEV_REFRESH_INTERVAL) * 1000 + 4 * SmartThing->getTransmitInterval();
+		}
+		else {
+			refLastMillis = millis();
+			refresh_Executor = 0;
+			refresh_Sensor = 0;
 		}
 	}
-	
+
 //public
 	void Everything::init()
 	{
@@ -169,7 +207,7 @@ namespace st
 	
 	void Everything::run()
 	{
-		updateSensors();			//call each st::Sensor object to refresh data
+		updateDevices();			//call each st::Sensor object to refresh data
 
 		#ifndef DISABLE_SMARTTHINGS
 			SmartThing->run();		//call the ST Shield Library to receive any data from the ST Hub
@@ -184,12 +222,12 @@ namespace st
 		#ifndef DISABLE_REFRESH		//Added new check to allow user to disable REFRESH feature - setting is in Constants.h)
 		if ((bTimersPending == 0) && ((millis() - refLastMillis) >= long(Constants::DEV_REFRESH_INTERVAL) * 1000))  //DEV_REFRESH_INTERVAL is set in Constants.h
 		{
-			refLastMillis = millis();
+			//refLastMillis = millis();
 			refreshDevices();	//call each st::Device object to refresh data (this is just a safeguard to ensure the state of the Arduino and the ST Cloud stay in synch should an event be missed)
 		}
 		#endif
 		
-		if(debug && millis()%60000==0 && millis()!=lastmillis)
+		if((debug) && (millis()%60000==0) && (millis()!=lastmillis))
 		{
 			lastmillis = millis();
 			Serial.print(F("Everything: Free Ram = "));  
@@ -197,12 +235,12 @@ namespace st
 		}
 	}
 	
-	bool Everything::sendSmartString(String &str)
+	bool Everything::sendSmartString(const String &str)
 	{
-		while(str.length()>1 && str[0]=='|') //get rid of leading pipes (messes up sendStrings()'s parsing technique)
-		{
-			str=str.substring(1);
-		}
+		//while(str.length()>1 && str[0]=='|') //get rid of leading pipes (messes up sendStrings()'s parsing technique)
+		//{
+		//	str=str.substring(1);
+		//}
 		if((str.length()==1 && str[0]=='|') || str.length()==0)
 		{
 			return false;
@@ -225,9 +263,11 @@ namespace st
 		}
 	}
 
-	bool Everything::sendSmartStringNow(String &str)
+	bool Everything::sendSmartStringNow(const String &str)
 	{
-		if (sendSmartString(str)) sendStrings(); //send any pending updates to ST Cloud immediately
+		bool queued = sendSmartString(str);
+		if (queued) sendStrings(); //send any pending updates to ST Cloud immediately
+		return queued;
 	}
 
 	Device* Everything::getDeviceByName(const String &str)
@@ -312,8 +352,17 @@ namespace st
 			Serial.print(F("Everything: Received: "));
 			Serial.println(message);
 		}
-		
-		if (message.length() > 1)		//ignore empty string messages from the ST Hub
+
+		if (Everything::callOnMsgRcvd2 != 0)
+		{
+			Everything::callOnMsgRcvd2(message);
+		}
+
+		if (message == "refresh")
+		{
+			Everything::refreshDevices();
+		}
+		else if (message.length() > 1)		//ignore empty string messages from the ST Hub
 		{
 			Device *p = Everything::getDeviceByName(message.substring(0, message.indexOf(' ')));
 			if (p != 0)
@@ -321,6 +370,12 @@ namespace st
 				p->beSmart(message);	//pass the incoming SmartThings Shield message to the correct Device's beSmart() routine
 			}
 		}
+		
+		if(Everything::callOnMsgRcvd!=0)
+		{
+			Everything::callOnMsgRcvd(message);
+		}
+
 	}
 	
 	//initialize static members
@@ -336,7 +391,9 @@ namespace st
 	bool Everything::debug=false;
 	byte Everything::bTimersPending=0;	//initialize variable
 	void (*Everything::callOnMsgSend)(const String &msg)=0; //initialize this callback function to null
-	
+	void (*Everything::callOnMsgRcvd)(const String &msg)=0; //initialize this callback function to null
+	void(*Everything::callOnMsgRcvd2)(String &msg) = 0; //initialize this callback function to null
+
 	//SmartThings static members
 	//#ifndef DISABLE_SMARTTHINGS
 	//	// Please refer to Constants.h for settings that affect whether a board uses SoftwareSerial or Hardware Serial calls
@@ -357,13 +414,15 @@ long freeRam()
 	extern int __heap_start, *__brkval;
 	int v;
 	return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
-#elif defined(ARDUINO_ARCH_ESP8266)
+#elif defined(ARDUINO_ARCH_ESP8266) || defined(ARDUINO_ARCH_ESP32)
 	return ESP.getFreeHeap();
+#elif defined(ARDUINO_ARCH_SAMD)
+	char top;
+	return &top - reinterpret_cast<char*>(sbrk(0));
 #else
 	return -1;
 #endif // !
 
 
 }
-	
 	
